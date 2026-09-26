@@ -1,36 +1,75 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 中国汽车出海情报探测系统
 
-## Getting Started
+聚合比亚迪、奇瑞、上汽 MG、长城、吉利、长安、蔚来、小鹏、零跑等中国车企在欧洲、东南亚、拉美、墨西哥、中东、澳洲、俄罗斯等出海目的地的公开新闻，基于关键词规则自动识别**企业、目的地国家、情报维度、情感与风险级别**，以中文情报看板呈现。
 
-First, run the development server:
+情报维度：新品发布 · 销量 · 生产/建厂 · 战略/合作 · 政治规则/政策（关税、反补贴、本地化要求、准入法规等）。
+
+## 功能
+
+- **数据采集**：按「企业 × 目的地区域」和「政策 × 目的地区域」构造约 120 条 Google News RSS 查询（中英文，免密钥），并发抓取；内存 + 文件缓存（`.cache/intel.json`），默认每 30 分钟自动刷新，支持手动刷新。外网抓取失败时自动回退到本地缓存或内置示例数据，界面不会空白。
+- **自动分类与结构化**：`src/lib/taxonomy.ts` 中的可扩展词表（企业别名与子品牌、国家/地区别名、维度关键词及权重、正负面词、高风险词）驱动 `src/lib/classify.ts` 的规则引擎；无需付费 LLM API。
+- **情报看板**：统计概览（各维度数量、高风险事件数）、按企业/目的地/维度/风险/时间/语言筛选与全文搜索、热点目的地与活跃企业排行、政策/政治规则专栏突出高风险事件。
+- **详情与去重**：详情弹窗展示摘要、识别到的实体、维度得分与命中关键词，并提供原文链接；按规范化标题 + 链接去重并合并实体。
+
+## 技术栈
+
+Next.js 16（App Router）· TypeScript · Tailwind CSS v4 · shadcn/ui · fast-xml-parser。无数据库、无鉴权。
+
+## 本地运行
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev        # http://localhost:41730
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+生产构建：
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm run build && npm run start
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+可选环境变量：
 
-## Learn More
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `INTEL_REFRESH_MINUTES` | `30` | 自动刷新间隔（分钟，最小 5） |
 
-To learn more about Next.js, take a look at the following resources:
+## API
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/news` | 返回全部情报与元信息（数据来源、更新时间、查询成功率等）。缓存过期时在后台触发刷新。 |
+| `POST` | `/api/refresh` | 强制重新抓取所有 RSS 查询。 |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## 目录结构
 
-## Deploy on Vercel
+```
+src/
+  app/
+    page.tsx                 # 页面骨架
+    api/news/route.ts        # 情报读取
+    api/refresh/route.ts     # 手动刷新
+  components/intel/          # 看板组件（统计、筛选、新闻卡片、政策专栏、排行、详情）
+  lib/
+    taxonomy.ts              # 企业 / 国家 / 维度 / 情感 / 风险词表（扩展入口）
+    classify.ts              # 规则分类引擎
+    collector.ts             # 查询构造、RSS 抓取解析、去重
+    store.ts                 # 缓存、定时刷新、种子回退
+    seed.ts                  # 兜底示例数据
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## 分类规则说明
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **企业**：别名（含子品牌，如腾势、Omoda、极氪、哈弗、深蓝）命中即打标，拉丁字母别名使用词边界匹配避免误报。
+- **目的地**：国家别名（含主要城市、机构如「欧委会」）命中即打标，并归并到所属区域。
+- **维度**：对每个维度的关键词加权求和（标题命中权重 ×2），取最高分；无命中归入「综合」。
+- **情感**：正负面词计数比较（标题 ×2）。
+- **风险**：政策维度且命中高风险词（关税、反补贴、禁令、制裁、调查、本地化率等）为**高风险**；政策维度或负面情感为中风险；其余为低风险。
+- **相关性过滤**：识别到企业且（识别到目的地或提及出海/出口）保留；或政策类且同时提及「中国」与「汽车」保留。
+
+## 已知限制
+
+- Google News RSS 的 `description` 多为标题重复，摘要通常为空，分类以标题为主。
+- 规则分类存在一定误判，「综合」类占比约 25%；可通过扩展 `taxonomy.ts` 词表持续优化。
+- RSS 链接为 Google News 跳转链接，点击后重定向至原文。
+- 未做持久化数据库，重启后依赖 `.cache/intel.json` 与重新抓取。
