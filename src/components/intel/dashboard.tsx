@@ -11,10 +11,11 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatDateTime, dimensionName } from "@/lib/format";
+import { intelDataUrl, isIntelPayload } from "@/lib/intel-data";
 import { COUNTRY_MAP, DIMENSIONS } from "@/lib/taxonomy";
 import type { DimensionId, IntelItem, IntelMeta, IntelPayload } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { AlertCircle, CheckCircle2, Database, FlaskConical, Radio, RefreshCw, SearchX } from "lucide-react";
+import { AlertCircle, CheckCircle2, Clock, Database, FlaskConical, Radio, RefreshCw, SearchX } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 const PAGE_SIZE = 30;
@@ -62,16 +63,17 @@ export function Dashboard() {
   const [now, setNow] = useState(() => Date.now());
 
   const load = useCallback(async (signal?: AbortSignal) => {
-    const res = await fetch("/api/news", { cache: "no-store", signal });
+    const res = await fetch(`${intelDataUrl()}?t=${Date.now()}`, { cache: "no-store", signal });
     if (!res.ok) {
-      const body = (await res.json().catch(() => ({}))) as { error?: string };
-      throw new Error(body.error ?? `服务返回 ${res.status}`);
+      throw new Error(res.status === 404 ? "数据文件尚未生成（本地请先运行 npm run fetch）" : `数据文件加载失败：HTTP ${res.status}`);
     }
-    const data = (await res.json()) as IntelPayload;
+    const data: unknown = await res.json();
+    if (!isIntelPayload(data)) throw new Error("数据文件格式不正确");
     setPayload(data);
     setNow(Date.now());
     setState("ready");
     setError(null);
+    return data;
   }, []);
 
   useEffect(() => {
@@ -97,18 +99,13 @@ export function Dashboard() {
   const handleRefresh = async () => {
     setRefreshing(true);
     setRefreshNote(null);
+    const previousUpdatedAt = payload?.meta.updatedAt ?? null;
     try {
-      const res = await fetch("/api/refresh", { method: "POST" });
-      if (!res.ok) throw new Error(`服务返回 ${res.status}`);
-      const data = (await res.json()) as IntelPayload;
-      setPayload(data);
-      setNow(Date.now());
-      setState("ready");
-      setError(null);
+      const latest = await load();
       setRefreshNote(
-        data.meta.dataSource === "live"
-          ? `刷新完成：${data.meta.succeededQueries}/${data.meta.totalQueries} 个查询成功，保留 ${data.meta.keptItems} 条情报`
-          : `上游抓取未成功，继续展示${data.meta.dataSource === "cache" ? "本地缓存" : "示例数据"}${data.meta.lastError ? `（${data.meta.lastError}）` : ""}`,
+        latest.meta.updatedAt && latest.meta.updatedAt !== previousUpdatedAt
+          ? `已加载最新数据（${formatDateTime(latest.meta.updatedAt)}）`
+          : "已重新加载，数据暂无更新；抓取由 GitHub Actions 每小时执行一次",
       );
     } catch (err) {
       setRefreshNote(`刷新失败：${err instanceof Error ? err.message : "未知错误"}`);
@@ -238,9 +235,9 @@ function StatusBar({ meta, state, refreshing, onRefresh, note }: { meta: IntelMe
   const source = meta?.dataSource;
   const sourceBadge =
     source === "live" ? (
-      <Badge className="border-transparent bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200"><Radio /> 实时抓取</Badge>
+      <Badge className="border-transparent bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200"><Radio /> 定时抓取</Badge>
     ) : source === "cache" ? (
-      <Badge className="border-transparent bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-200"><Database /> 本地缓存</Badge>
+      <Badge className="border-transparent bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-200"><Database /> 上次成功抓取</Badge>
     ) : source === "seed" ? (
       <Badge className="border-transparent bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200"><FlaskConical /> 示例数据</Badge>
     ) : (
@@ -253,15 +250,20 @@ function StatusBar({ meta, state, refreshing, onRefresh, note }: { meta: IntelMe
         {sourceBadge}
         {meta && (
           <>
-            <span>更新于 {formatDateTime(meta.updatedAt)}</span>
+            <span className="inline-flex items-center gap-1">
+              <Clock className="size-3.5" />
+              最近更新 {formatDateTime(meta.updatedAt)}
+            </span>
             {meta.totalQueries > 0 && (
               <span className="inline-flex items-center gap-1">
                 {meta.failedQueries === 0 ? <CheckCircle2 className="size-3.5 text-emerald-600" /> : <AlertCircle className="size-3.5 text-amber-600" />}
                 {meta.succeededQueries}/{meta.totalQueries} 个 RSS 查询成功
               </span>
             )}
-            <span>每 {meta.refreshIntervalMinutes} 分钟自动刷新</span>
-            {meta.dataSource === "seed" && <span className="text-amber-700 dark:text-amber-300">外网抓取失败或无结果，正在展示内置示例数据</span>}
+            <span>
+              数据每{meta.refreshIntervalMinutes === 60 ? "小时" : ` ${meta.refreshIntervalMinutes} 分钟`}由 GitHub Actions 自动抓取并重新发布
+            </span>
+            {meta.dataSource === "seed" && <span className="text-amber-700 dark:text-amber-300">上次抓取失败或无结果，正在展示内置示例数据</span>}
             {meta.lastError && meta.dataSource !== "seed" && <span className="text-amber-700 dark:text-amber-300">{meta.lastError}</span>}
           </>
         )}
@@ -269,9 +271,9 @@ function StatusBar({ meta, state, refreshing, onRefresh, note }: { meta: IntelMe
       </div>
       <div className="flex items-center gap-2">
         {note && <span className={cn("hidden text-xs text-muted-foreground md:inline", note.startsWith("刷新失败") && "text-red-600")}>{note}</span>}
-        <Button size="sm" variant="outline" onClick={onRefresh} disabled={refreshing || state === "loading"}>
+        <Button size="sm" variant="outline" onClick={onRefresh} disabled={refreshing || state === "loading"} title="重新读取最新发布的数据文件">
           <RefreshCw className={cn(refreshing && "animate-spin")} />
-          {refreshing ? "抓取中…" : "立即刷新"}
+          {refreshing ? "加载中…" : "重新加载"}
         </Button>
       </div>
       {note && <span className={cn("text-xs text-muted-foreground md:hidden", note.startsWith("刷新失败") && "text-red-600")}>{note}</span>}
