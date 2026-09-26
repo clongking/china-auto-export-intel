@@ -4,9 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 41730",
+    "fetch": "tsx scripts/fetch-intel.ts",
+    "prebuild": "tsx scripts/fetch-intel.ts --if-missing",
     "build": "next build",
-    "start": "next start -p 41730",
-    "lint": "eslint"
+    "preview": "serve out -l 41731",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",
@@ -27,7 +30,9 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.6",
+    "serve": "^14.2.6",
     "tailwindcss": "^4",
+    "tsx": "^4.23.15",
     "typescript": "^5"
   }
 }

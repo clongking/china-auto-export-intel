@@ -40,3 +40,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .cache/
+
+# generated intel data (scripts/fetch-intel.ts)
+/public/data/

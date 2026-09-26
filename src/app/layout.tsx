@@ -18,7 +18,7 @@ export const metadata: Metadata = {
     "聚合比亚迪、奇瑞、上汽 MG、长城、吉利、长安、蔚来、小鹏、零跑等企业在欧洲、东南亚、拉美、中东、澳洲等目的地的新闻情报，自动识别新品发布、销量、建厂、战略合作与政策风险。",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html
       lang="zh-CN"
