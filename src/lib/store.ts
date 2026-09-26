@@ -100,7 +100,7 @@ function isStale(s: StoreState): boolean {
   return Date.now() - new Date(s.updatedAt).getTime() > REFRESH_INTERVAL_MINUTES * 60_000;
 }
 
-async function doRefresh(s: StoreState): Promise<IntelPayload> {
+async function doRefresh(s: StoreState): Promise<void> {
   const queries = buildQueries();
   s.lastAttemptAt = Date.now();
   try {
@@ -125,7 +125,6 @@ async function doRefresh(s: StoreState): Promise<IntelPayload> {
     s.lastError = err instanceof Error ? err.message : String(err);
     if (s.items.length > 0) s.dataSource = "cache";
   }
-  return payload(s);
 }
 
 function ensureScheduler(s: StoreState) {
@@ -147,8 +146,9 @@ export async function refreshIntel({ force = false }: { force?: boolean } = {}):
   if (s.refreshing) return s.refreshing;
   // 距上次尝试不足 60 秒且非强制时直接返回，防止手动刷新被滥用
   if (!force && Date.now() - s.lastAttemptAt < 60_000) return payload(s);
-  s.refreshing = doRefresh(s).finally(() => {
+  s.refreshing = doRefresh(s).then(() => {
     s.refreshing = null;
+    return payload(s);
   });
   return s.refreshing;
 }
